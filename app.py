@@ -10,10 +10,6 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import gc  # <-- ADD THIS NEW LINE
 
-# ... (Keep the rest of your app code)
-
-# ... (Keep the rest of your app code exactly the same below this) ...
-
 # --- 1. CORE CONFIG & ADVANCED CSS ---
 st.set_page_config(page_title="EchoSign Pro", page_icon="🤟", layout="wide")
 
@@ -84,7 +80,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. THE ENGINE ---
 # --- 2. THE ENGINE ---
 import mediapipe as mp
 mp_hands = mp.solutions.hands
@@ -193,7 +188,7 @@ if st.session_state.page == "Translator":
     
     col_l, col_c, col_r = st.columns([1, 1.4, 1.1], gap="large")
 
-   with col_l:
+    with col_l:
         st.subheader("📤 1. Upload Sequence")
         files = st.file_uploader("Upload in sentence order", type=["mp4", "mov"], accept_multiple_files=True)
         if files and st.button("🚀 CONSTRUCT SENTENCE", type="primary", use_container_width=True):
