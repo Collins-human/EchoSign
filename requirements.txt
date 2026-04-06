@@ -1,13 +1,6 @@
 streamlit
 opencv-python-headless
 mediapipe
-tensorflow
-numpy
+tensorflow==2.15.0
+numpy<2.0.0
 pandas
-tornado==6.5.5
-typing_extensions==4.15.0
-tzdata==2025.3
-urllib3==2.6.3
-watchdog==6.0.0
-Werkzeug==3.1.7
-wrapt==1.14.2
