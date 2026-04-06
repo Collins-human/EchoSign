@@ -84,7 +84,8 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 2. THE ENGINE ---
-mp_hands = mp.solutions.hands
+# --- 2. THE ENGINE ---
+import mediapipe.python.solutions.hands as mp_hands
 hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5)
 
 @st.cache_resource
