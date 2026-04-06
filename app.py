@@ -1,4 +1,17 @@
 import streamlit as st
+import sys
+import subprocess
+
+# --- 🚨 STREAMLIT CLOUD OPENCV BYPASS 🚨 ---
+# If the cloud server is missing graphics drivers, this uninstalls 
+# the broken OpenCV and forces the headless Cloud-Safe version.
+try:
+    import cv2
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python", "opencv-contrib-python", "opencv-python-headless"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python-headless"])
+
+# --- CORE IMPORTS ---
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -8,6 +21,8 @@ import pandas as pd
 from datetime import datetime
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+# ... (Keep the rest of your app code exactly the same below this) ...
 
 # --- 1. CORE CONFIG & ADVANCED CSS ---
 st.set_page_config(page_title="EchoSign Pro", page_icon="🤟", layout="wide")
