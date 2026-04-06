@@ -8,6 +8,7 @@ import pandas as pd
 from datetime import datetime
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+import gc  # <-- ADD THIS NEW LINE
 
 # ... (Keep the rest of your app code)
 
@@ -103,24 +104,44 @@ labels = sorted(['AGAIN', 'ANGRY', 'BAD', 'BOOK', 'BROTHER', 'CAR', 'COME', 'COM
 def extract_landmarks(video_path):
     cap = cv2.VideoCapture(video_path)
     sequence = []
+    frame_counter = 0
+    
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret: break
+            
+        frame_counter += 1
+        # Skip every other frame to save massive amounts of memory
+        if frame_counter % 2 == 0: 
+            continue
+            
+        # Shrink the frame resolution to reduce RAM load
+        frame = cv2.resize(frame, (320, 240))
         image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = hands.process(image)
         frame_coords = np.zeros(126) 
+        
         if results.multi_hand_landmarks:
             for i, hand_landmarks in enumerate(results.multi_hand_landmarks):
                 if i < 2: 
                     coords = np.array([[res.x, res.y, res.z] for res in hand_landmarks.landmark]).flatten()
                     frame_coords[i*63 : i*63 + 63] = coords
         sequence.append(frame_coords)
+        
     cap.release()
+    gc.collect()  # Force the server to dump the video from memory
     return sequence
 
 def process_video(video_path, filename):
     raw_sequence = extract_landmarks(video_path)
+    
+    # 1. EMPTY HAND CHECK
+    # If the sequence is totally empty or just zeros, MediaPipe saw no hands
+    if not raw_sequence or np.all(raw_sequence == 0):
+        return {"File": filename, "Prediction": "NO HANDS DETECTED", "Confidence": 0.0}
+
     best_conf, best_idx = 0, 0
+    
     if len(raw_sequence) < 30:
         input_data = pad_sequences([raw_sequence], maxlen=30, padding='post', dtype='float32')
         res = model.predict(input_data, verbose=0)[0]
@@ -134,7 +155,17 @@ def process_video(video_path, filename):
             if res[np.argmax(res)] > best_conf:
                 best_idx = np.argmax(res)
                 best_conf = res[best_idx]
-    return {"File": filename, "Prediction": labels[best_idx], "Confidence": round(best_conf*100, 1)}
+                
+    # 2. THE CONFIDENCE THRESHOLD
+    # If the AI is less than 70% sure, reject the translation
+    CONFIDENCE_LIMIT = 0.70  
+    
+    if best_conf < CONFIDENCE_LIMIT:
+        final_prediction = "UNRECOGNIZED"
+    else:
+        final_prediction = labels[best_idx]
+
+    return {"File": filename, "Prediction": final_prediction, "Confidence": round(best_conf*100, 1)}
 
 # --- 3. SESSION STATE ---
 if 'page' not in st.session_state: st.session_state.page = "Translator"
@@ -162,7 +193,7 @@ if st.session_state.page == "Translator":
     
     col_l, col_c, col_r = st.columns([1, 1.4, 1.1], gap="large")
 
-    with col_l:
+   with col_l:
         st.subheader("📤 1. Upload Sequence")
         files = st.file_uploader("Upload in sentence order", type=["mp4", "mov"], accept_multiple_files=True)
         if files and st.button("🚀 CONSTRUCT SENTENCE", type="primary", use_container_width=True):
@@ -170,9 +201,15 @@ if st.session_state.page == "Translator":
             for f in files:
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as t:
                     t.write(f.read())
-                    res = process_video(t.name, f.name)
-                    st.session_state.results_data.append(res)
-                os.remove(t.name)
+                    temp_path = t.name
+                
+                # Process the video
+                res = process_video(temp_path, f.name)
+                st.session_state.results_data.append(res)
+                
+                # Ruthlessly clean up memory
+                os.remove(temp_path)
+                gc.collect()
 
     with col_c:
         st.subheader("🎥 2. Translation")
