@@ -130,17 +130,9 @@ def extract_landmarks(video_path):
 def process_video(video_path, filename):
     raw_sequence = extract_landmarks(video_path)
     
-    # 1. EMPTY SEQUENCE CHECK
-    if not raw_sequence:
-        return {"File": filename, "Prediction": "NO HANDS DETECTED", "Confidence": 0.0}
-
-    # --- THE HAND PRESENCE RATIO FIX ---
-    # Count how many frames actually contain hand landmarks (not just empty zeros)
-    valid_frames = [frame for frame in raw_sequence if not np.all(frame == 0)]
-    hand_ratio = len(valid_frames) / len(raw_sequence) if len(raw_sequence) > 0 else 0
-    
-    # Require hands to be visible for at least 15% of the video (Ignores brief glitches)
-    if hand_ratio < 0.15:
+    # 1. EMPTY HAND CHECK
+    # If the sequence is totally empty or just zeros, MediaPipe saw no hands
+    if not raw_sequence or np.all(raw_sequence == 0):
         return {"File": filename, "Prediction": "NO HANDS DETECTED", "Confidence": 0.0}
 
     best_conf, best_idx = 0, 0
@@ -159,9 +151,9 @@ def process_video(video_path, filename):
                 best_idx = np.argmax(res)
                 best_conf = res[best_idx]
                 
-    # --- THE CONFIDENCE THRESHOLD FIX ---
-    # Set to 60% - The "Goldilocks Zone" for balancing accuracy and forgiveness
-    CONFIDENCE_LIMIT = 0.60  
+    # 2. THE CONFIDENCE THRESHOLD
+    # If the AI is less than 70% sure, reject the translation
+    CONFIDENCE_LIMIT = 0.70  
     
     if best_conf < CONFIDENCE_LIMIT:
         final_prediction = "UNRECOGNIZED"
