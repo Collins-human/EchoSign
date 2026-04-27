@@ -106,11 +106,9 @@ def extract_landmarks(video_path):
         if not ret: break
             
         frame_counter += 1
-        # Skip every other frame to save massive amounts of memory
         if frame_counter % 2 == 0: 
             continue
             
-        # Shrink the frame resolution to reduce RAM load
         frame = cv2.resize(frame, (320, 240))
         image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = hands.process(image)
@@ -124,36 +122,65 @@ def extract_landmarks(video_path):
         sequence.append(frame_coords)
         
     cap.release()
-    gc.collect()  # Force the server to dump the video from memory
+    gc.collect()
     return sequence
 
 def process_video(video_path, filename):
     raw_sequence = extract_landmarks(video_path)
     
     # 1. EMPTY HAND CHECK
-    # If the sequence is totally empty or just zeros, MediaPipe saw no hands
     if not raw_sequence or np.all(raw_sequence == 0):
         return {"File": filename, "Prediction": "NO HANDS DETECTED", "Confidence": 0.0}
 
+    valid_frames = [frame for frame in raw_sequence if not np.all(frame == 0)]
+    hand_ratio = len(valid_frames) / len(raw_sequence) if len(raw_sequence) > 0 else 0
+    
+    # 2. THE RATIO CHECK (Must see hands for 15% of video)
+    if hand_ratio < 0.15:
+        return {"File": filename, "Prediction": "NO HANDS DETECTED", "Confidence": 0.0}
+
+    # 3. THE STILLNESS CHECK (Rejects static photos)
+    if len(valid_frames) > 1:
+        max_movement = np.max(np.ptp(valid_frames, axis=0))
+        if max_movement < 0.02:
+            return {"File": filename, "Prediction": "STATIC IMAGE REJECTED", "Confidence": 0.0}
+
     best_conf, best_idx = 0, 0
+    window_predictions = [] # <--- NEW: Track all guesses
     
     if len(raw_sequence) < 30:
         input_data = pad_sequences([raw_sequence], maxlen=30, padding='post', dtype='float32')
         res = model.predict(input_data, verbose=0)[0]
         best_idx = np.argmax(res)
         best_conf = res[best_idx]
+        window_predictions.append(best_idx)
     else:
         for start in range(0, len(raw_sequence) - 30, 8):
             window = raw_sequence[start : start + 30]
             input_data = np.expand_dims(window, axis=0)
             res = model.predict(input_data, verbose=0)[0]
-            if res[np.argmax(res)] > best_conf:
-                best_idx = np.argmax(res)
-                best_conf = res[best_idx]
+            
+            current_idx = np.argmax(res)
+            window_predictions.append(current_idx) # Record the guess for this fraction of a second
+            
+            if res[current_idx] > best_conf:
+                best_idx = current_idx
+                best_conf = res[current_idx]
+
+    # --- NEW: THE CONSISTENCY CHECK (Random Waving Filter) ---
+    # If the video is long enough to have multiple windows, check if the AI agrees with itself.
+    if len(window_predictions) > 2:
+        # Count how many times the "best" prediction actually appeared
+        vote_count = window_predictions.count(best_idx)
+        consistency_ratio = vote_count / len(window_predictions)
+        
+        # If the best guess didn't even win 30% of the windows, it was a random scatter of guesses.
+        if consistency_ratio < 0.30:
+            return {"File": filename, "Prediction": "RANDOM MOVEMENT REJECTED", "Confidence": round(best_conf*100, 1)}
+    # ---------------------------------------------------------
                 
-    # 2. THE CONFIDENCE THRESHOLD
-    # If the AI is less than 70% sure, reject the translation
-    CONFIDENCE_LIMIT = 0.70  
+    # 4. THE CONFIDENCE THRESHOLD
+    CONFIDENCE_LIMIT = 0.60  
     
     if best_conf < CONFIDENCE_LIMIT:
         final_prediction = "UNRECOGNIZED"
@@ -190,6 +217,8 @@ if st.session_state.page == "Translator":
 
     with col_l:
         st.subheader("📤 1. Upload Sequence")
+        st.info("⏱️ Note: Please ensure each video is under 10 seconds for optimal processing.")
+        
         files = st.file_uploader("Upload in sentence order", type=["mp4", "mov"], accept_multiple_files=True)
         if files and st.button("🚀 CONSTRUCT SENTENCE", type="primary", use_container_width=True):
             st.session_state.results_data = []
@@ -198,11 +227,27 @@ if st.session_state.page == "Translator":
                     t.write(f.read())
                     temp_path = t.name
                 
+                # Check video duration
+                cap = cv2.VideoCapture(temp_path)
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                duration = frame_count / fps if fps > 0 else 0
+                cap.release()
+                
+                if duration > 10.0:
+                    st.error(f"⚠️ '{f.name}' is too long ({duration:.1f}s). Skipped.")
+                    os.remove(temp_path)
+                    continue 
+                
                 # Process the video
                 res = process_video(temp_path, f.name)
-                st.session_state.results_data.append(res)
                 
-                # Ruthlessly clean up memory
+                # Flag and dispense non-sign/static/random videos
+                if res["Prediction"] in ["NO HANDS DETECTED", "UNRECOGNIZED", "STATIC IMAGE REJECTED", "RANDOM MOVEMENT REJECTED"]:
+                    st.warning(f"🚫 '{f.name}' was skipped ({res['Prediction']}).")
+                else:
+                    st.session_state.results_data.append(res)
+                
                 os.remove(temp_path)
                 gc.collect()
 
@@ -217,7 +262,7 @@ if st.session_state.page == "Translator":
             item = next(x for x in st.session_state.results_data if x["File"] == choice)
             st.markdown(f'<div class="detected-card"><div class="word-main">{item["Prediction"]}</div></div>', unsafe_allow_html=True)
         else:
-            st.info("Upload videos to see results.")
+            st.info("Upload valid ASL videos to see results.")
 
     with col_r:
         st.subheader("📊 3. Session Data")
@@ -241,7 +286,6 @@ if st.session_state.page == "Translator":
 elif st.session_state.page == "Community":
     st.markdown('<div class="main-header"><h1>EchoSign Community Chat</h1></div>', unsafe_allow_html=True)
     
-    # Chat Input Section
     with st.container():
         user_name = st.text_input("Enter your Name:", placeholder="Tumuheki or Nakitende...")
         chat_msg = st.text_area("Your Message:", placeholder="Type here to chat with other signers...")
@@ -257,7 +301,6 @@ elif st.session_state.page == "Community":
 
     st.divider()
     
-    # Display Chat Feed
     st.subheader("Live Feed")
     for post in reversed(st.session_state.community_posts):
         st.markdown(f"""
