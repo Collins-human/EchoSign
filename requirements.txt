@@ -1,5 +1,8 @@
 streamlit
-mediapipe==0.10.14
-tensorflow==2.15.0
-numpy<2.0.0
+mediapipe
+opencv-python-headless
+numpy
 pandas
+tensorflow-cpu
+streamlit-webrtc
+av
